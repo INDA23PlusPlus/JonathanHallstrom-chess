@@ -91,7 +91,7 @@ impl Board {
 
     // only for debugging purposes, all moves played should come from get_legal_moves
     fn is_out_of_bounds(&self, m: Move) -> bool {
-        return m.end_pos.0 < 64 && m.end_pos.1 < 64;
+        return !(m.end_pos.0 < 64 && m.end_pos.1 < 64);
     }
 
     // only for debugging purposes, all moves played should come from get_legal_moves
