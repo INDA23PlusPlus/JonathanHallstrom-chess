@@ -154,7 +154,7 @@ impl Board {
                 let captured_piece = *captured_piece;
 
                 opponent_pieces.retain(|x| *x != captured_piece);
-                *opponent_piece_bit_board ^= 1 << pos_to_idx(captured_piece.pos);
+                *opponent_piece_bit_board &= !(1u64 << pos_to_idx(captured_piece.pos));
             }
         }
 
@@ -164,8 +164,8 @@ impl Board {
             pos: m.end_pos,
         });
 
-        *curr_player_piece_bit_board ^= 1 << pos_to_idx(moved_piece.pos);
-        *curr_player_piece_bit_board ^= 1 << pos_to_idx(m.end_pos);
+        *curr_player_piece_bit_board &= !(1u64 << pos_to_idx(m.start_pos));
+        *curr_player_piece_bit_board |= 1u64 << pos_to_idx(m.end_pos);
 
         self.played_moves.push(m);
 
