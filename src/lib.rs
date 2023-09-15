@@ -1,5 +1,3 @@
-use std::fmt::write;
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum PieceType {
     #[default]
@@ -61,6 +59,10 @@ impl std::fmt::Display for MoveError {
 
 impl std::error::Error for MoveError {}
 
+fn pos_to_idx(pos: (u8, u8)) -> u8 {
+    8 * pos.0 + pos.1
+}
+
 impl Board {
     pub fn is_white_to_play(&self) -> bool {
         return self.played_moves.len() % 2 == 0;
@@ -73,11 +75,10 @@ impl Board {
     // only for debugging purposes, all moves played should come from get_legal_moves
     fn is_self_capture(&self, m: Move) -> bool {
         if let Some(captured_piece) = m.captured_piece {
-            let target_square: u8 = 8 * captured_piece.pos.0 + captured_piece.pos.1;
             if self.is_white_to_play() {
-                return (self.white_piece_bitboard >> target_square & 1) == 1;
+                return (self.white_piece_bitboard >> pos_to_idx(captured_piece.pos) & 1) == 1;
             } else {
-                return (self.black_piece_bitboard >> target_square & 1) == 1;
+                return (self.black_piece_bitboard >> pos_to_idx(captured_piece.pos) & 1) == 1;
             }
         } else {
             return false;
@@ -123,10 +124,24 @@ impl Board {
             return Err(MoveError::CapturingEmptySquare);
         }
 
-        let (curr_player_pieces, opponent_pieces) = if self.is_white_to_play() {
+        let is_white_to_play = self.is_white_to_play();
+
+        let (curr_player_pieces, opponent_pieces) = if is_white_to_play {
             (&mut self.white_pieces, &mut self.black_pieces)
         } else {
             (&mut self.black_pieces, &mut self.white_pieces)
+        };
+
+        let (curr_player_piece_bit_board, opponent_piece_bit_board) = if is_white_to_play {
+            (
+                &mut self.white_piece_bitboard,
+                &mut self.black_piece_bitboard,
+            )
+        } else {
+            (
+                &mut self.black_piece_bitboard,
+                &mut self.white_piece_bitboard,
+            )
         };
 
         let moved_piece = *curr_player_pieces
@@ -134,13 +149,12 @@ impl Board {
             .find(|x| x.pos == m.start_pos)
             .unwrap();
 
-
-        
         if let Some(captured_piece) = m.captured_piece {
             if let Some(captured_piece) = opponent_pieces.iter().find(|x| **x == captured_piece) {
                 let captured_piece = *captured_piece;
 
                 opponent_pieces.retain(|x| *x != captured_piece);
+                *opponent_piece_bit_board ^= 1 << pos_to_idx(captured_piece.pos);
             }
         }
 
@@ -149,6 +163,9 @@ impl Board {
             tp: moved_piece.tp,
             pos: m.end_pos,
         });
+
+        *curr_player_piece_bit_board ^= 1 << pos_to_idx(moved_piece.pos);
+        *curr_player_piece_bit_board ^= 1 << pos_to_idx(m.end_pos);
 
         self.played_moves.push(m);
 
