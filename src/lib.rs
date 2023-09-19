@@ -1,9 +1,9 @@
 #![allow(unused)]
-use std::convert::identity;
+use std::{collections::HashSet, convert::identity};
 
 use itertools::*;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PieceType {
     #[default]
     None,
@@ -36,31 +36,49 @@ impl Bitboard {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Color {
     #[default]
     White,
     Black,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Piece {
     tp: PieceType,
     pos: (u8, u8),
     col: Color,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Move {
     start_piece: Piece,
     end_piece: Piece,
     captured_piece: Option<Piece>,
 }
 
-#[derive(Debug, Clone)]
+impl Move {
+    fn unknown_move() -> Move {
+        Move {
+            start_piece: Piece {
+                tp: PieceType::None,
+                pos: (0, 0),
+                col: Color::White,
+            },
+            end_piece: Piece {
+                tp: PieceType::None,
+                pos: (0, 0),
+                col: Color::White,
+            },
+            captured_piece: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Board {
-    white_pieces: Vec<Piece>,
-    black_pieces: Vec<Piece>,
+    white_pieces: HashSet<Piece>,
+    black_pieces: HashSet<Piece>,
 
     white_piece_bitboard: Bitboard,
     black_piece_bitboard: Bitboard,
@@ -68,11 +86,17 @@ pub struct Board {
     played_moves: Vec<Move>,
 }
 
+impl Default for Board {
+    fn default() -> Self {
+        Self::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap()
+    }
+}
+
 impl Board {
     pub fn empty() -> Board {
         Board {
-            white_pieces: vec![],
-            black_pieces: vec![],
+            white_pieces: HashSet::new(),
+            black_pieces: HashSet::new(),
             white_piece_bitboard: Bitboard(0),
             black_piece_bitboard: Bitboard(0),
             played_moves: vec![],
@@ -82,14 +106,118 @@ impl Board {
     fn add_piece(&mut self, p: Piece) {
         match p.col {
             Color::White => {
-                self.white_pieces.push(p);
+                self.white_pieces.insert(p);
                 self.white_piece_bitboard.set(p.pos);
             }
             Color::Black => {
-                self.black_pieces.push(p);
+                self.black_pieces.insert(p);
                 self.black_piece_bitboard.set(p.pos);
             }
         }
+    }
+
+    pub fn from_fen(fen_str: &str) -> Option<Board> {
+        let mut board = Board::empty();
+        let mut sections = fen_str.split_terminator(' ');
+        let mut table_data_section = sections.next()?;
+
+        let rows = dbg!(table_data_section
+            .split_terminator('/')
+            .filter(|x| !x.is_empty())
+            .collect::<Vec<&str>>());
+
+        if rows.len() != 8 {
+            return None;
+        }
+
+        for (row, i) in rows.iter().zip(0..) {
+            let mut j = 0;
+            for c in row.chars() {
+                match c {
+                    'p' => board.add_piece(Piece {
+                        tp: PieceType::Pawn,
+                        pos: (7 - i, j),
+                        col: Color::Black,
+                    }),
+                    'P' => board.add_piece(Piece {
+                        tp: PieceType::Pawn,
+                        pos: (7 - i, j),
+                        col: Color::White,
+                    }),
+                    'n' => board.add_piece(Piece {
+                        tp: PieceType::Knight,
+                        pos: (7 - i, j),
+                        col: Color::Black,
+                    }),
+                    'N' => board.add_piece(Piece {
+                        tp: PieceType::Knight,
+                        pos: (7 - i, j),
+                        col: Color::White,
+                    }),
+                    'b' => board.add_piece(Piece {
+                        tp: PieceType::Bishop,
+                        pos: (7 - i, j),
+                        col: Color::Black,
+                    }),
+                    'B' => board.add_piece(Piece {
+                        tp: PieceType::Bishop,
+                        pos: (7 - i, j),
+                        col: Color::White,
+                    }),
+                    'r' => board.add_piece(Piece {
+                        tp: PieceType::Rook,
+                        pos: (7 - i, j),
+                        col: Color::Black,
+                    }),
+                    'R' => board.add_piece(Piece {
+                        tp: PieceType::Rook,
+                        pos: (7 - i, j),
+                        col: Color::White,
+                    }),
+                    'q' => board.add_piece(Piece {
+                        tp: PieceType::Queen,
+                        pos: (7 - i, j),
+                        col: Color::Black,
+                    }),
+                    'Q' => board.add_piece(Piece {
+                        tp: PieceType::Queen,
+                        pos: (7 - i, j),
+                        col: Color::White,
+                    }),
+                    'k' => board.add_piece(Piece {
+                        tp: PieceType::King,
+                        pos: (7 - i, j),
+                        col: Color::Black,
+                    }),
+                    'K' => board.add_piece(Piece {
+                        tp: PieceType::King,
+                        pos: (7 - i, j),
+                        col: Color::White,
+                    }),
+                    '1'..='8' => j += (c as u8) - b'1',
+                    _ => return None,
+                }
+                j += 1;
+            }
+            if j != 8 {
+                return None;
+            }
+        }
+
+        let turn = dbg!(sections.next()?.chars()).next()?;
+
+        let castling_rights = dbg!(sections.next())?;
+        let en_passant_target = dbg!(sections.next())?;
+
+        let elapsed_half_moves = dbg!(sections.next())?.parse::<u8>().ok()?;
+        let moves = dbg!(sections.next())?.parse::<u32>().ok()?;
+
+        if (moves % 2 == 1) != (turn == 'w') {
+            return None;
+        }
+
+        board.played_moves = (1..moves).map(|_| Move::unknown_move()).collect();
+        Some(board)
     }
 }
 
@@ -153,17 +281,9 @@ impl Board {
 
         c.play_unchecked(m);
 
-        if c.get_all_moves().iter().any(|x| {
-            if let Some(c) = x.captured_piece {
-                c.tp == PieceType::King
-            } else {
-                false
-            }
-        }) {
-            true
-        } else {
-            false
-        }
+        c.get_all_moves()
+            .iter()
+            .any(|x| x.captured_piece.is_some_and(|c| c.tp == PieceType::King))
     }
 
     fn is_out_of_bounds(&self, m: Move) -> bool {
@@ -203,7 +323,7 @@ impl Board {
         }
     }
 
-    fn get_pieces(&self) -> (&Vec<Piece>, &Vec<Piece>) {
+    fn get_pieces(&self) -> (&HashSet<Piece>, &HashSet<Piece>) {
         let is_white_to_play = self.is_white_to_play();
         if is_white_to_play {
             (&self.white_pieces, &self.black_pieces)
@@ -212,7 +332,7 @@ impl Board {
         }
     }
 
-    fn get_pieces_mut(&mut self) -> (&mut Vec<Piece>, &mut Vec<Piece>) {
+    fn get_pieces_mut(&mut self) -> (&mut HashSet<Piece>, &mut HashSet<Piece>) {
         let is_white_to_play = self.is_white_to_play();
         if is_white_to_play {
             (&mut self.white_pieces, &mut self.black_pieces)
@@ -259,10 +379,9 @@ impl Board {
         }
 
         curr_player_pieces.retain(|x| *x != moved_piece);
-        curr_player_pieces.push(Piece {
-            tp: moved_piece.tp,
+        curr_player_pieces.insert(Piece {
             pos: m.end_piece.pos,
-            col: curr_player,
+            ..m.start_piece
         });
 
         curr_player_bitboard.clear(m.start_piece.pos);
@@ -291,12 +410,17 @@ impl Board {
             return Err(MoveError::CapturingEmptySquare);
         };
 
-        Ok(self.play_unchecked(m))
+        self.play_unchecked(m);
+        Ok(())
     }
 
     // Undoes last played move, if there is no such move it returns `None`
     pub fn undo_last_move(&mut self) -> Option<()> {
-        let mv = self.played_moves.last()?;
+        let mv = *self.played_moves.last()?;
+        if mv == Move::unknown_move() {
+            return None;
+        }
+        self.played_moves.pop();
 
         // have to do this horribleness to deal with ownership
         let curr_player = self.get_curr_player();
@@ -322,16 +446,14 @@ impl Board {
 
         if let Some(captured) = mv.captured_piece {
             opponent_bitboard.set(captured.pos);
-            opponent_pieces.push(captured);
+            opponent_pieces.insert(captured);
         }
 
         curr_player_bitboard.clear(mv.end_piece.pos);
         curr_player_bitboard.set(mv.start_piece.pos);
 
-        *curr_player_pieces
-            .iter_mut()
-            .find(|p| **p == mv.start_piece)
-            .unwrap() = mv.end_piece;
+        curr_player_pieces.remove(&mv.end_piece);
+        curr_player_pieces.insert(mv.start_piece);
 
         Some(())
     }
@@ -489,20 +611,16 @@ impl Board {
     }
 
     fn get_king_moves(&self, p: Piece) -> Vec<Move> {
+        let in_range = |x| (0..8).contains(&x);
         iproduct!(-1..=1, -1..=1)
-            .filter(|(dr, dc)| {
-                0 <= (p.pos.0 as i8) + dr
-                    && (p.pos.0 as i8) + dr < 8
-                    && 0 <= (p.pos.1 as i8) + dc
-                    && (p.pos.1 as i8) + dc < 8
-            })
-            .map(|(dr, dc)| {
+            // filters out moves that end up outside the board
+            .filter(|(dr, dc)| in_range((p.pos.0 as i8) + dr) && in_range((p.pos.1 as i8) + dc))
+            .flat_map(|(dr, dc)| {
                 self.get_move(
                     p,
                     (((p.pos.0 as i8) + dr) as u8, ((p.pos.1 as i8) + dc) as u8),
                 )
             })
-            .filter_map(identity)
             .collect()
     }
 
@@ -566,73 +684,99 @@ mod tests {
     fn generating_correct_rook_moves() {
         let mut b = Board::empty();
 
-        b.add_piece(Piece {
+        let p1 = Piece {
             pos: (0, 0),
             tp: PieceType::Rook,
             col: Color::White,
-        });
-        assert_eq!(b.get_rook_moves(b.white_pieces[0]).len(), 14);
+        };
+        b.add_piece(p1);
+        assert_eq!(b.get_rook_moves(p1).len(), 14);
         b.add_piece(Piece {
             tp: PieceType::Knight,
             pos: (0, 1),
             col: Color::White,
         });
-        assert_eq!(b.get_rook_moves(b.white_pieces[0]).len(), 7);
+        assert_eq!(b.get_rook_moves(p1).len(), 7);
         b.add_piece(Piece {
             tp: PieceType::Knight,
             pos: (2, 0),
             col: Color::White,
         });
-        assert_eq!(b.get_rook_moves(b.white_pieces[0]).len(), 1);
+        assert_eq!(b.get_rook_moves(p1).len(), 1);
         b.add_piece(Piece {
             tp: PieceType::Knight,
             pos: (1, 0),
             col: Color::White,
         });
-        assert_eq!(b.get_rook_moves(b.white_pieces[0]).len(), 0);
+        assert_eq!(b.get_rook_moves(p1).len(), 0);
     }
 
     #[test]
     fn generating_correct_bishop_moves() {
         let mut b = Board::empty();
 
-        b.add_piece(Piece {
+        let white_bishop = Piece {
             pos: (0, 0),
             tp: PieceType::Bishop,
             col: Color::White,
-        });
-        assert_eq!(b.get_bishop_moves(b.white_pieces[0]).len(), 7);
+        };
+        b.add_piece(white_bishop);
+        assert_eq!(b.get_bishop_moves(white_bishop).len(), 7);
         b.add_piece(Piece {
             tp: PieceType::Knight,
             pos: (3, 3),
             col: Color::Black,
         });
-        // dbg!(b.get_bishop_moves(b.white_pieces[0]));
-        assert_eq!(b.get_bishop_moves(b.white_pieces[0]).len(), 3);
+        assert_eq!(b.get_bishop_moves(white_bishop).len(), 3);
         assert!(b
-            .get_bishop_moves(b.white_pieces[0])
+            .get_bishop_moves(white_bishop)
             .iter()
-            .find(|x| x.captured_piece.is_some())
-            .is_some());
+            .any(|x| x.captured_piece.is_some()));
         b.add_piece(Piece {
             tp: PieceType::Knight,
             pos: (1, 1),
             col: Color::White,
         });
-        assert_eq!(b.get_bishop_moves(b.white_pieces[0]).len(), 0);
+        assert_eq!(b.get_bishop_moves(white_bishop).len(), 0);
         b = Board::empty();
 
-        b.add_piece(Piece {
+        let white_bishop = Piece {
             pos: (1, 2),
             tp: PieceType::Bishop,
             col: Color::White,
-        });
-        dbg!(b.get_bishop_moves(b.white_pieces[0]));
-        assert_eq!(b.get_bishop_moves(b.white_pieces[0]).len(), 9);
+        };
+        b.add_piece(white_bishop);
+        dbg!(b.get_bishop_moves(white_bishop));
+        assert_eq!(b.get_bishop_moves(white_bishop).len(), 9);
     }
 
     #[test]
-    fn basic_discoveries() {
+    fn generating_correct_king_moves() {
+        let mut b = Board::empty();
+        let p1 = Piece {
+            tp: PieceType::King,
+            pos: (1, 1),
+            col: Color::White,
+        };
+        b.add_piece(p1);
+        assert_eq!(b.get_king_moves(p1).len(), 8);
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (1, 2),
+            col: Color::Black,
+        });
+        assert_eq!(b.get_king_moves(p1).len(), 8);
+        assert_eq!(b.get_legal_moves().len(), 6); // the bishop blocks two squares
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (2, 1),
+            col: Color::White,
+        });
+        assert_eq!(b.get_king_moves(p1).len(), 7);
+    }
+
+    #[test]
+    fn basic_undo() {
         let mut b = Board::empty();
         b.add_piece(Piece {
             tp: PieceType::King,
@@ -640,10 +784,56 @@ mod tests {
             col: Color::White,
         });
         b.add_piece(Piece {
-            tp: PieceType::Rook,
+            tp: PieceType::Bishop,
             pos: (0, 1),
             col: Color::White,
         });
+
+        let mut cp = b.clone();
+        for mv in b.get_legal_moves() {
+            cp.play_move(mv);
+            cp.undo_last_move().unwrap();
+            assert_eq!(cp, b);
+        }
+    }
+
+    #[test]
+    fn undo_possible_capture() {
+        let mut b = Board::empty();
+        b.add_piece(Piece {
+            tp: PieceType::King,
+            pos: (0, 0),
+            col: Color::White,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (0, 1),
+            col: Color::Black,
+        });
+
+        let mut cp = b.clone();
+        for mv in b.get_legal_moves() {
+            cp.play_move(mv);
+            cp.undo_last_move().unwrap();
+            assert_eq!(cp, b);
+        }
+    }
+
+    #[test]
+    fn basic_discoveries() {
+        let mut b = Board::empty();
+        let white_king = Piece {
+            tp: PieceType::King,
+            pos: (0, 0),
+            col: Color::White,
+        };
+        b.add_piece(white_king);
+        let white_rook = Piece {
+            tp: PieceType::Rook,
+            pos: (0, 1),
+            col: Color::White,
+        };
+        b.add_piece(white_rook);
         b.add_piece(Piece {
             tp: PieceType::Rook,
             pos: (0, 2),
@@ -661,8 +851,125 @@ mod tests {
         R
         K
         */
-        assert_eq!(b.get_king_moves(b.white_pieces[0]).len(), 2);
-        assert_eq!(b.get_rook_moves(b.white_pieces[1]).len(), 8);
+        assert_eq!(b.get_king_moves(white_king).len(), 2);
+        assert_eq!(b.get_rook_moves(white_rook).len(), 8);
         assert_eq!(dbg!(b.get_legal_moves()).len(), 3);
+    }
+
+    #[test]
+    fn rejecting_obviously_wrong_fen() {
+        assert!(Board::from_fen("").is_none());
+        assert!(Board::from_fen("a").is_none());
+        assert!(Board::from_fen("/////// - - 0 1").is_none());
+        assert!(Board::from_fen("8/8/8/8/8/8/8/ w - 0 1").is_none());
+    }
+
+    #[test]
+    fn accepting_correct_fen() {
+        assert_eq!(
+            Board::from_fen("8/8/8/8/8/8/8/8 w - - 0 1").unwrap(),
+            Board::empty()
+        );
+    }
+
+    #[test]
+    fn correct_default_position() {
+        let mut b = Board::empty();
+        b.add_piece(Piece {
+            tp: PieceType::Rook,
+            pos: (0, 0),
+            col: Color::White,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Rook,
+            pos: (0, 7),
+            col: Color::White,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Knight,
+            pos: (0, 1),
+            col: Color::White,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Knight,
+            pos: (0, 6),
+            col: Color::White,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (0, 2),
+            col: Color::White,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (0, 5),
+            col: Color::White,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Queen,
+            pos: (0, 3),
+            col: Color::White,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::King,
+            pos: (0, 4),
+            col: Color::White,
+        });
+
+        b.add_piece(Piece {
+            tp: PieceType::Rook,
+            pos: (7, 0),
+            col: Color::Black,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Rook,
+            pos: (7, 7),
+            col: Color::Black,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Knight,
+            pos: (7, 1),
+            col: Color::Black,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Knight,
+            pos: (7, 6),
+            col: Color::Black,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (7, 2),
+            col: Color::Black,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (7, 5),
+            col: Color::Black,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::Queen,
+            pos: (7, 3),
+            col: Color::Black,
+        });
+        b.add_piece(Piece {
+            tp: PieceType::King,
+            pos: (7, 4),
+            col: Color::Black,
+        });
+
+        for i in 0..8 {
+            b.add_piece(Piece {
+                tp: PieceType::Pawn,
+                pos: (1, i),
+                col: Color::White,
+            });
+            b.add_piece(Piece {
+                tp: PieceType::Pawn,
+                pos: (6, i),
+                col: Color::Black,
+            });
+        }
+
+        assert_eq!(b, Board::default());
     }
 }
