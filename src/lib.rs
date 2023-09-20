@@ -92,8 +92,16 @@ impl Default for Board {
     }
 }
 
+fn pos_to_string(pos: (u8, u8)) -> String {
+    let mut res = String::with_capacity(2);
+
+    res.push((b'a' + pos.1) as char);
+    res.push((b'1' + pos.0) as char);
+    res
+}
+
 impl Board {
-    pub fn empty() -> Board {
+    fn empty() -> Board {
         Board {
             white_pieces: HashSet::new(),
             black_pieces: HashSet::new(),
@@ -114,6 +122,14 @@ impl Board {
                 self.black_piece_bitboard.set(p.pos);
             }
         }
+    }
+
+    pub fn get_all_pieces(&self) -> HashSet<Piece> {
+        self.white_pieces
+            .iter()
+            .chain(self.black_pieces.iter())
+            .copied()
+            .collect()
     }
 
     pub fn from_fen(fen_str: &str) -> Option<Board> {
@@ -216,8 +232,98 @@ impl Board {
             return None;
         }
 
-        board.played_moves = (1..moves).map(|_| Move::unknown_move()).collect();
+        board.played_moves = (0..((moves - 1) % 2))
+            .map(|_| Move::unknown_move())
+            .collect();
         Some(board)
+    }
+
+    pub fn to_fen(&self) -> String {
+        let mut res = String::new();
+
+        let get_repr = |p: Piece| {
+            let ch = match p.tp {
+                PieceType::None => panic!(),
+                PieceType::Pawn => 'p',
+                PieceType::Knight => 'n',
+                PieceType::Bishop => 'b',
+                PieceType::Rook => 'r',
+                PieceType::Queen => 'q',
+                PieceType::King => 'k',
+            };
+            if p.col == Color::White {
+                ch.to_ascii_uppercase()
+            } else {
+                ch
+            }
+        };
+
+        for i in 0..8 {
+            let r = 7 - i;
+            let mut last: i8 = -1;
+            for j in 0..8 {
+                let c = j;
+
+                if self.white_piece_bitboard.get((r, c)) {
+                    let p = self.white_pieces.iter().find(|p| p.pos == (r, c)).unwrap();
+                    let empty_to_add = ((c as i8) - last - 1) as u8;
+                    if empty_to_add >= 1 {
+                        res.push((empty_to_add + b'0') as char);
+                    }
+                    res.push(get_repr(*p));
+                    last = c as i8;
+                } else if self.black_piece_bitboard.get((r, c)) {
+                    let p = self.black_pieces.iter().find(|p| p.pos == (r, c)).unwrap();
+                    let empty_to_add = ((c as i8) - last - 1) as u8;
+                    if empty_to_add >= 1 {
+                        res.push((empty_to_add + b'0') as char);
+                    }
+                    res.push(get_repr(*p));
+                    last = c as i8;
+                }
+            }
+            if last != 7 {
+                res.push((b'0' as i8 + 7 as i8 - last) as u8 as char);
+            }
+            if i < 7 {
+                res += "/";
+            }
+        }
+
+        if self.is_white_to_play() {
+            res += " w";
+        } else {
+            res += " b";
+        }
+
+        res += " -"; // castling rights
+
+        if self.played_moves.last().is_some_and(|m| {
+            m.end_piece.tp == PieceType::Pawn && m.end_piece.pos.0.abs_diff(m.end_piece.pos.0) == 2
+        }) {
+            let m = self.played_moves.last().unwrap();
+            res += " ";
+            res.push_str(&pos_to_string(m.end_piece.pos));
+        } else {
+            res += " -";
+        }
+
+        let mut num_plys = 0;
+
+        for m in &self.played_moves {
+            if m.start_piece.tp == PieceType::Pawn || m.captured_piece.is_some() {
+                num_plys = 0;
+            } else {
+                num_plys += 1;
+            }
+        }
+
+        res += " ";
+        res += &num_plys.to_string();
+        res += " ";
+        res += &(1 + self.played_moves.len() / 2).to_string();
+
+        res
     }
 }
 
@@ -259,6 +365,12 @@ impl Board {
         }
     }
 
+    pub fn is_in_check(&self) -> bool {
+        self.get_all_moves()
+            .iter()
+            .any(|x| x.captured_piece.is_some_and(|c| c.tp == PieceType::King))
+    }
+
     fn is_white_to_play(&self) -> bool {
         self.get_curr_player() == Color::White
     }
@@ -281,9 +393,7 @@ impl Board {
 
         c.play_unchecked(m);
 
-        c.get_all_moves()
-            .iter()
-            .any(|x| x.captured_piece.is_some_and(|c| c.tp == PieceType::King))
+        c.is_in_check()
     }
 
     fn is_out_of_bounds(&self, m: Move) -> bool {
@@ -388,6 +498,10 @@ impl Board {
         curr_player_bitboard.set(m.end_piece.pos);
 
         self.played_moves.push(m);
+    }
+
+    pub fn is_legal_move(&self, m: Move) -> bool {
+        self.get_legal_moves().iter().contains(&m)
     }
 
     // If the provided move is valid, the state of the board will be the result of playing the
@@ -642,34 +756,48 @@ impl Board {
     // doesn't yet support promotions or en passant
     fn get_pawn_moves(&self, p: Piece) -> Vec<Move> {
         let in_range = |x| (0..8).contains(&x);
-        iproduct!(-2i8..=2i8, -1i8..=1i8)
-            // only allow moving in the direction corresponding to the color of the pawn
-            .filter(|(dr, _)| (*dr > 0) == (p.col == Color::White))
-            // only allow moving two squares if on second or seventh row
-            .filter(|(dr, _)| {
-                if dr.abs() == 2 {
-                    p.pos.0 == 1 || p.pos.0 == 6
-                } else {
-                    true
+        let dr = if p.col == Color::White { 1 } else { -1 };
+        let mut res = Vec::new();
+        if (p.pos.0 == 1 && p.col == Color::White) || (p.pos.0 == 6 && p.col == Color::Black) {
+            if let Some(m) = self.get_move(p, ((p.pos.0 as i8 + dr) as u8, p.pos.1)) {
+                if m.captured_piece.is_none() {
+                    res.push(m);
                 }
-            })
-            // disallow capturing when moving two squares
-            .filter(|(dr, dc)| dr.abs() + dc.abs() < 3)
-            // filters out moves that end up outside the board
-            .filter(|(dr, dc)| in_range((p.pos.0 as i8) + dr) && in_range((p.pos.1 as i8) + dc))
-            .flat_map(|(dr, dc)| {
-                self.get_move(
-                    p,
-                    (((p.pos.0 as i8) + dr) as u8, ((p.pos.1 as i8) + dc) as u8),
-                )
-            })
-            // filter out attempt to capture empty square with pawn
-            .filter(|m| {
-                !(m.end_piece.pos.0.abs_diff(m.start_piece.pos.0) == 1
-                    && m.end_piece.pos.1.abs_diff(m.start_piece.pos.1) == 1
-                    && m.captured_piece.is_none())
-            })
-            .collect()
+                if let Some(m) = self.get_move(p, ((p.pos.0 as i8 + 2 * dr) as u8, p.pos.1)) {
+                    if m.captured_piece.is_none() {
+                        res.push(m);
+                    }
+                }
+            }
+        } else if in_range(p.pos.0 as i8 + dr) {
+            if let Some(m) = self.get_move(p, ((p.pos.0 as i8 + dr) as u8, p.pos.1)) {
+                if m.captured_piece.is_none() {
+                    res.push(m);
+                }
+            }
+        }
+
+        if in_range(p.pos.0 as i8 + dr) && in_range(p.pos.1 as i8 + 1) {
+            if let Some(m) =
+                self.get_move(p, ((p.pos.0 as i8 + dr) as u8, (p.pos.1 as i8 + 1) as u8))
+            {
+                if m.captured_piece.is_some() {
+                    res.push(m);
+                }
+            }
+        }
+
+        if in_range(p.pos.0 as i8 + dr) && in_range(p.pos.1 as i8 - 1) {
+            if let Some(m) =
+                self.get_move(p, ((p.pos.0 as i8 + dr) as u8, (p.pos.1 as i8 - 1) as u8))
+            {
+                if m.captured_piece.is_some() {
+                    res.push(m);
+                }
+            }
+        }
+
+        res
     }
 
     fn get_all_moves_for_piece(&self, p: Piece) -> Vec<Move> {
@@ -860,9 +988,10 @@ mod tests {
             col: Color::White,
         };
         b.add_piece(p1);
-        assert_eq!(b.get_all_moves_for_piece(p1).len(), 2);
+        assert_eq!(dbg!(b.get_all_moves_for_piece(p1)).len(), 2);
         for m in b.get_all_moves_for_piece(p1) {
             b.play_move(m);
+            dbg!(&b.white_pieces);
             assert_eq!(
                 dbg!(b.get_all_moves_for_piece(*b.white_pieces.iter().next().unwrap())).len(),
                 1
@@ -909,7 +1038,7 @@ mod tests {
 
         let mut cp = b.clone();
         for mv in b.get_legal_moves() {
-            cp.play_move(mv);
+            cp.play_move(mv).unwrap();
             cp.undo_last_move().unwrap();
             assert_eq!(cp, b);
         }
@@ -941,12 +1070,6 @@ mod tests {
             col: Color::Black,
         });
 
-        /*
-        k
-        r
-        R
-        K
-        */
         assert_eq!(b.get_king_moves(white_king).len(), 2);
         assert_eq!(b.get_rook_moves(white_rook).len(), 8);
         assert_eq!(dbg!(b.get_legal_moves()).len(), 3);
@@ -1068,5 +1191,120 @@ mod tests {
 
         assert_eq!(b, Board::default());
         assert_eq!(b.get_legal_moves().len(), 20);
+    }
+
+    #[test]
+    fn generating_correct_fen() {
+        assert_eq!(Board::empty().to_fen(), "8/8/8/8/8/8/8/8 w - - 0 1");
+        assert_eq!(
+            Board::from_fen(&Board::default().to_fen()).unwrap(),
+            Board::default()
+        );
+    }
+
+    #[derive(Debug)]
+    struct PerftInfo {
+        num_positions: u64,
+        num_checks: u64,
+        num_captures: u64,
+    }
+
+    fn perft(b: &mut Board, depth: usize) -> PerftInfo {
+        if depth == 0 {
+            PerftInfo {
+                num_positions: 1,
+                num_checks: b.is_in_check() as u64,
+                num_captures: 0,
+            }
+        } else {
+            let mut res = PerftInfo {
+                num_positions: 0,
+                num_checks: 0,
+                num_captures: 0,
+            };
+            for mv in b.get_legal_moves() {
+                b.play_unchecked(mv);
+                let o = perft(b, depth - 1);
+                res.num_positions += o.num_positions;
+                res.num_captures += o.num_captures;
+                res.num_checks += o.num_checks;
+                res.num_captures += mv.captured_piece.is_some() as u64;
+                b.undo_last_move();
+            }
+            res
+        }
+    }
+
+    fn perft_dbg(b: &mut Board, depth: usize) -> PerftInfo {
+        if depth == 0 {
+            PerftInfo {
+                num_positions: 1,
+                num_checks: b.is_in_check() as u64,
+                num_captures: 0,
+            }
+        } else {
+            let mut res = PerftInfo {
+                num_positions: 0,
+                num_checks: 0,
+                num_captures: 0,
+            };
+            let mut dbg_out = Vec::new();
+            for mv in b.get_legal_moves() {
+                b.play_unchecked(mv);
+                let o = perft(b, depth - 1);
+                dbg_out.push(
+                    pos_to_string(mv.start_piece.pos)
+                        + &pos_to_string(mv.end_piece.pos)
+                        + ": "
+                        + &o.num_positions.to_string(),
+                );
+                res.num_positions += o.num_positions;
+                res.num_captures += o.num_captures;
+                res.num_checks += o.num_checks;
+                res.num_captures += mv.captured_piece.is_some() as u64;
+                b.undo_last_move();
+            }
+            dbg_out.sort();
+            dbg!(dbg_out.iter().join(" "));
+            res
+        }
+    }
+
+    #[test]
+    fn perft_starting_pos() {
+        let mut b = Board::default();
+        assert_eq!(perft(&mut b, 1).num_positions, 20);
+        assert_eq!(perft(&mut b, 2).num_positions, 400);
+    }
+
+    #[test]
+    fn perft_() {
+        let mut b = Board::from_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1").unwrap();
+        assert_eq!(dbg!(perft(&mut b, 1)).num_positions, 14);
+        assert_eq!(dbg!(perft(&mut b, 2)).num_positions, 191);
+    }
+
+    #[test]
+    fn perft_1() {
+        // values taken from stockfish
+        let mut b = Board::from_fen("8/KR4rk/8/8/8/8/8/8 w - - 0 1").unwrap();
+        assert_eq!(perft(&mut b, 1).num_positions, 9);
+        assert_eq!(perft(&mut b, 2).num_positions, 65);
+        assert_eq!(perft(&mut b, 3).num_positions, 717);
+        let mut b = Board::from_fen("8/KR4rk/8/5N2/8/8/8/8 w - - 0 1").unwrap();
+        assert_eq!(perft(&mut b, 1).num_positions, 17);
+        assert_eq!(perft(&mut b, 2).num_positions, 122);
+        assert_eq!(perft(&mut b, 3).num_positions, 1909);
+        let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1bQ2/8/4R3 w - - 0 1").unwrap();
+        assert_eq!(perft(&mut b, 1).num_positions, 48);
+        assert_eq!(perft(&mut b, 2).num_positions, 1277);
+        assert_eq!(perft(&mut b, 3).num_positions, 53702);
+        let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1bQ2/5P2/4R3 w - - 0 1").unwrap();
+        assert_eq!(perft(&mut b, 1).num_positions, 47);
+        assert_eq!(perft(&mut b, 2).num_positions, 1201);
+        assert_eq!(perft_dbg(&mut b, 3).num_positions, 50014);
+        let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1PQ2/8/4R3 b - - 0 2").unwrap();
+        assert_eq!(perft(&mut b, 1).num_positions, 24);
+        assert_eq!(perft_dbg(&mut b, 2).num_positions, 1053);
     }
 }
