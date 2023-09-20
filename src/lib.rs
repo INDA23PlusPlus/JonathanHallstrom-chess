@@ -758,6 +758,7 @@ impl Board {
         let in_range = |x| (0..8).contains(&x);
         let dr = if p.col == Color::White { 1 } else { -1 };
         let mut res = Vec::new();
+        // if this is our first pawn move, check if one then if two moves are possible
         if (p.pos.0 == 1 && p.col == Color::White) || (p.pos.0 == 6 && p.col == Color::Black) {
             if let Some(m) = self.get_move(p, ((p.pos.0 as i8 + dr) as u8, p.pos.1)) {
                 if m.captured_piece.is_none() {
@@ -783,6 +784,29 @@ impl Board {
             {
                 if m.captured_piece.is_some() {
                     res.push(m);
+                }
+            }
+        }
+        if let Some(last_move) = self.played_moves.last() {
+            if last_move.end_piece.tp == PieceType::Pawn
+                && last_move
+                    .end_piece
+                    .pos
+                    .0
+                    .abs_diff(last_move.start_piece.pos.0)
+                    == 2
+            {
+                if last_move.end_piece.pos.0 == p.pos.0
+                    && last_move.end_piece.pos.1.abs_diff(p.pos.1) == 1
+                {
+                    res.push(Move {
+                        start_piece: p,
+                        end_piece: Piece {
+                            pos: ((p.pos.0 as i8 + dr) as u8, last_move.end_piece.pos.1),
+                            ..p
+                        },
+                        captured_piece: Some(last_move.end_piece),
+                    });
                 }
             }
         }
@@ -998,6 +1022,22 @@ mod tests {
             );
             b.undo_last_move();
         }
+        b.add_piece(Piece {
+            tp: PieceType::Pawn,
+            pos: (3, 1),
+            col: Color::Black,
+        });
+        b.play_move(
+            *b.get_legal_moves()
+                .iter()
+                .find(|m| m.end_piece.pos.0.abs_diff(m.start_piece.pos.0) == 2)
+                .unwrap(),
+        );
+        assert_eq!(b.get_legal_moves().len(), 2);
+        assert!(b
+            .get_legal_moves()
+            .iter()
+            .any(|m| m.captured_piece.is_some()));
     }
 
     #[test]
@@ -1275,13 +1315,7 @@ mod tests {
         let mut b = Board::default();
         assert_eq!(perft(&mut b, 1).num_positions, 20);
         assert_eq!(perft(&mut b, 2).num_positions, 400);
-    }
-
-    #[test]
-    fn perft_() {
-        let mut b = Board::from_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1").unwrap();
-        assert_eq!(dbg!(perft(&mut b, 1)).num_positions, 14);
-        assert_eq!(dbg!(perft(&mut b, 2)).num_positions, 191);
+        assert_eq!(perft(&mut b, 3).num_positions, 8902);
     }
 
     #[test]
@@ -1302,9 +1336,13 @@ mod tests {
         let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1bQ2/5P2/4R3 w - - 0 1").unwrap();
         assert_eq!(perft(&mut b, 1).num_positions, 47);
         assert_eq!(perft(&mut b, 2).num_positions, 1201);
-        assert_eq!(perft_dbg(&mut b, 3).num_positions, 50014);
+        assert_eq!(perft(&mut b, 3).num_positions, 50014);
         let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1PQ2/8/4R3 b - - 0 2").unwrap();
         assert_eq!(perft(&mut b, 1).num_positions, 24);
-        assert_eq!(perft_dbg(&mut b, 2).num_positions, 1053);
+        assert_eq!(perft(&mut b, 2).num_positions, 1053);
+        assert_eq!(perft(&mut b, 3).num_positions, 20940);
+        let mut b = Board::from_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1").unwrap();
+        assert_eq!(dbg!(perft(&mut b, 1)).num_positions, 14);
+        assert_eq!(dbg!(perft(&mut b, 2)).num_positions, 191);
     }
 }
