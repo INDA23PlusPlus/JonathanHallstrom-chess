@@ -624,11 +624,59 @@ impl Board {
             .collect()
     }
 
+    fn get_knight_moves(&self, p: Piece) -> Vec<Move> {
+        let in_range = |x| (0..8).contains(&x);
+        iproduct!(-2i8..=2i8, -2i8..=2i8)
+            .filter(|(dr, dc)| dr.abs() + dc.abs() == 3)
+            // filters out moves that end up outside the board
+            .filter(|(dr, dc)| in_range((p.pos.0 as i8) + dr) && in_range((p.pos.1 as i8) + dc))
+            .flat_map(|(dr, dc)| {
+                self.get_move(
+                    p,
+                    (((p.pos.0 as i8) + dr) as u8, ((p.pos.1 as i8) + dc) as u8),
+                )
+            })
+            .collect()
+    }
+
+    // doesn't yet support promotions or en passant
+    fn get_pawn_moves(&self, p: Piece) -> Vec<Move> {
+        let in_range = |x| (0..8).contains(&x);
+        iproduct!(-2i8..=2i8, -1i8..=1i8)
+            // only allow moving in the direction corresponding to the color of the pawn
+            .filter(|(dr, _)| (*dr > 0) == (p.col == Color::White))
+            // only allow moving two squares if on second or seventh row
+            .filter(|(dr, _)| {
+                if dr.abs() == 2 {
+                    p.pos.0 == 1 || p.pos.0 == 6
+                } else {
+                    true
+                }
+            })
+            // disallow capturing when moving two squares
+            .filter(|(dr, dc)| dr.abs() + dc.abs() < 3)
+            // filters out moves that end up outside the board
+            .filter(|(dr, dc)| in_range((p.pos.0 as i8) + dr) && in_range((p.pos.1 as i8) + dc))
+            .flat_map(|(dr, dc)| {
+                self.get_move(
+                    p,
+                    (((p.pos.0 as i8) + dr) as u8, ((p.pos.1 as i8) + dc) as u8),
+                )
+            })
+            // filter out attempt to capture empty square with pawn
+            .filter(|m| {
+                !(m.end_piece.pos.0.abs_diff(m.start_piece.pos.0) == 1
+                    && m.end_piece.pos.1.abs_diff(m.start_piece.pos.1) == 1
+                    && m.captured_piece.is_none())
+            })
+            .collect()
+    }
+
     fn get_all_moves_for_piece(&self, p: Piece) -> Vec<Move> {
         match p.tp {
             PieceType::None => panic!(),
-            PieceType::Pawn => unimplemented!(),
-            PieceType::Knight => unimplemented!(),
+            PieceType::Pawn => self.get_pawn_moves(p),
+            PieceType::Knight => self.get_knight_moves(p),
             PieceType::Bishop => self.get_bishop_moves(p),
             PieceType::Rook => self.get_rook_moves(p),
             PieceType::Queen => {
@@ -773,6 +821,54 @@ mod tests {
             col: Color::White,
         });
         assert_eq!(b.get_king_moves(p1).len(), 7);
+    }
+
+    #[test]
+    fn generating_correct_knight_moves() {
+        let mut b = Board::empty();
+        let p1 = Piece {
+            tp: PieceType::Knight,
+            pos: (4, 4),
+            col: Color::White,
+        };
+        b.add_piece(p1);
+        assert_eq!(b.get_all_moves_for_piece(p1).len(), 8);
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (5, 6),
+            col: Color::White,
+        });
+        assert_eq!(b.get_all_moves_for_piece(p1).len(), 7);
+        b.add_piece(Piece {
+            tp: PieceType::Bishop,
+            pos: (6, 5),
+            col: Color::Black,
+        });
+        assert_eq!(b.get_all_moves_for_piece(p1).len(), 7);
+        assert!(b
+            .get_all_moves_for_piece(p1)
+            .iter()
+            .any(|m| m.captured_piece.is_some()));
+    }
+
+    #[test]
+    fn generating_correct_pawn_moves() {
+        let mut b = Board::empty();
+        let p1 = Piece {
+            tp: PieceType::Pawn,
+            pos: (1, 0),
+            col: Color::White,
+        };
+        b.add_piece(p1);
+        assert_eq!(b.get_all_moves_for_piece(p1).len(), 2);
+        for m in b.get_all_moves_for_piece(p1) {
+            b.play_move(m);
+            assert_eq!(
+                dbg!(b.get_all_moves_for_piece(*b.white_pieces.iter().next().unwrap())).len(),
+                1
+            );
+            b.undo_last_move();
+        }
     }
 
     #[test]
@@ -971,5 +1067,6 @@ mod tests {
         }
 
         assert_eq!(b, Board::default());
+        assert_eq!(b.get_legal_moves().len(), 20);
     }
 }
