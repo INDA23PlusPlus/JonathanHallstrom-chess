@@ -15,6 +15,20 @@ pub enum PieceType {
     King,
 }
 
+impl PieceType {
+    fn get_repr(&self) -> char {
+        match self {
+            PieceType::None => panic!(),
+            PieceType::Pawn => 'p',
+            PieceType::Knight => 'n',
+            PieceType::Bishop => 'b',
+            PieceType::Rook => 'r',
+            PieceType::Queen => 'q',
+            PieceType::King => 'k',
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Bitboard(u64);
 
@@ -236,10 +250,7 @@ impl Board {
         let elapsed_half_moves = dbg!(sections.next())?.parse::<u8>().ok()?;
         let moves = dbg!(sections.next())?.parse::<u32>().ok()?;
 
-        if (moves % 2 == 1) != (turn == 'w') {
-            return None;
-        }
-        board.played_moves = (0..((moves - 1) % 2))
+        board.played_moves = (0..((moves - 1) / 2 * 2 + (turn == 'b') as u32))
             .map(|_| Move::unknown_move())
             .collect();
 
@@ -294,15 +305,7 @@ impl Board {
         let mut res = String::new();
 
         let get_repr = |p: Piece| {
-            let ch = match p.tp {
-                PieceType::None => panic!(),
-                PieceType::Pawn => 'p',
-                PieceType::Knight => 'n',
-                PieceType::Bishop => 'b',
-                PieceType::Rook => 'r',
-                PieceType::Queen => 'q',
-                PieceType::King => 'k',
-            };
+            let ch = p.tp.get_repr();
             if p.col == Color::White {
                 ch.to_ascii_uppercase()
             } else {
@@ -628,10 +631,7 @@ impl Board {
         }
 
         curr_player_pieces.retain(|x| *x != moved_piece);
-        curr_player_pieces.insert(Piece {
-            pos: m.end_piece.pos,
-            ..m.start_piece
-        });
+        curr_player_pieces.insert(m.end_piece);
 
         curr_player_bitboard.clear(m.start_piece.pos);
         curr_player_bitboard.set(m.end_piece.pos);
@@ -650,9 +650,8 @@ impl Board {
             Some(Move {
                 start_piece: p,
                 end_piece: Piece {
-                    tp: p.tp,
                     pos,
-                    col: p.col,
+                    ..p
                 },
                 captured_piece: Some(*opponent_pieces.iter().find(|x| x.pos == pos).unwrap()),
             })
@@ -660,9 +659,8 @@ impl Board {
             Some(Move {
                 start_piece: p,
                 end_piece: Piece {
-                    tp: p.tp,
                     pos,
-                    col: p.col,
+                    ..p
                 },
                 captured_piece: None,
             })
@@ -820,7 +818,6 @@ impl Board {
             .collect()
     }
 
-    // doesn't yet support promotions or en passant
     fn get_pawn_moves(&self, p: Piece) -> Vec<Move> {
         let in_range = |x| (0..8).contains(&x);
         let dr = if p.col == Color::White { 1 } else { -1 };
@@ -838,22 +835,69 @@ impl Board {
                 }
             }
         } else if in_range(p.pos.0 as i8 + dr) {
-            if let Some(m) = self.get_move(p, ((p.pos.0 as i8 + dr) as u8, p.pos.1)) {
+            if let Some(mut m) = self.get_move(p, ((p.pos.0 as i8 + dr) as u8, p.pos.1)) {
                 if m.captured_piece.is_none() {
-                    res.push(m);
+                    if m.end_piece.pos.0 == 0 || m.end_piece.pos.0 == 7 {
+                        // promotion
+                        m.end_piece.tp = PieceType::Knight;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Bishop;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Rook;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Queen;
+                        res.push(m);
+                    } else {
+                        res.push(m);
+                    }
                 }
             }
         }
 
         if in_range(p.pos.0 as i8 + dr) && in_range(p.pos.1 as i8 + 1) {
-            if let Some(m) =
+            if let Some(mut m) =
                 self.get_move(p, ((p.pos.0 as i8 + dr) as u8, (p.pos.1 as i8 + 1) as u8))
             {
                 if m.captured_piece.is_some() {
-                    res.push(m);
+                    if m.end_piece.pos.0 == 0 || m.end_piece.pos.0 == 7 {
+                        // promotion
+                        m.end_piece.tp = PieceType::Knight;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Bishop;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Rook;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Queen;
+                        res.push(m);
+                    } else {
+                        res.push(m);
+                    }
                 }
             }
         }
+
+        if in_range(p.pos.0 as i8 + dr) && in_range(p.pos.1 as i8 - 1) {
+            if let Some(mut m) =
+                self.get_move(p, ((p.pos.0 as i8 + dr) as u8, (p.pos.1 as i8 - 1) as u8))
+            {
+                if m.captured_piece.is_some() {
+                    if m.end_piece.pos.0 == 0 || m.end_piece.pos.0 == 7 {
+                        // promotion
+                        m.end_piece.tp = PieceType::Knight;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Bishop;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Rook;
+                        res.push(m);
+                        m.end_piece.tp = PieceType::Queen;
+                        res.push(m);
+                    } else {
+                        res.push(m);
+                    }
+                }
+            }
+        }
+
         if let Some(last_move) = self.played_moves.last() {
             if last_move.end_piece.tp == PieceType::Pawn
                 && last_move
@@ -874,16 +918,6 @@ impl Board {
                         },
                         captured_piece: Some(last_move.end_piece),
                     });
-                }
-            }
-        }
-
-        if in_range(p.pos.0 as i8 + dr) && in_range(p.pos.1 as i8 - 1) {
-            if let Some(m) =
-                self.get_move(p, ((p.pos.0 as i8 + dr) as u8, (p.pos.1 as i8 - 1) as u8))
-            {
-                if m.captured_piece.is_some() {
-                    res.push(m);
                 }
             }
         }
@@ -1333,6 +1367,7 @@ mod tests {
                 num_captures: 0,
             };
             for mv in b.get_legal_moves() {
+                let before = b.clone();
                 b.play_unchecked(mv);
                 let o = perft(b, depth - 1);
                 res.num_positions += o.num_positions;
@@ -1340,6 +1375,14 @@ mod tests {
                 res.num_checks += o.num_checks;
                 res.num_captures += mv.captured_piece.is_some() as u64;
                 b.undo_last_move();
+                dbg!("");
+                dbg!(mv);
+                assert!(dbg!(&b.white_pieces).is_subset(dbg!(&before.white_pieces)));
+                assert!(dbg!(&b.black_pieces).is_subset(dbg!(&before.black_pieces)));
+                assert!(before.white_pieces.is_subset(&b.white_pieces));
+                assert!(before.black_pieces.is_subset(&b.black_pieces));
+                assert_eq!(b.white_piece_bitboard, before.white_piece_bitboard);
+                assert_eq!(b.black_piece_bitboard, before.black_piece_bitboard);
             }
             res
         }
@@ -1362,12 +1405,13 @@ mod tests {
             for mv in b.get_legal_moves() {
                 b.play_unchecked(mv);
                 let o = perft(b, depth - 1);
-                dbg_out.push(
-                    pos_to_string(mv.start_piece.pos)
-                        + &pos_to_string(mv.end_piece.pos)
-                        + ": "
-                        + &o.num_positions.to_string(),
-                );
+                let mut mv_str =
+                    pos_to_string(mv.start_piece.pos) + &pos_to_string(mv.end_piece.pos);
+                if mv.end_piece.tp != mv.start_piece.tp {
+                    mv_str.push(mv.end_piece.tp.get_repr());
+                }
+
+                dbg_out.push(mv_str + ": " + &o.num_positions.to_string());
                 res.num_positions += o.num_positions;
                 res.num_captures += o.num_captures;
                 res.num_checks += o.num_checks;
@@ -1387,6 +1431,9 @@ mod tests {
         assert_eq!(perft(&mut b, 2).num_positions, 400);
         assert_eq!(perft(&mut b, 3).num_positions, 8902);
         assert_eq!(perft(&mut b, 4).num_positions, 197281);
+
+        // no castling support yet
+        // assert_eq!(perft(&mut b, 5).num_positions, 4865609);
     }
 
     #[test]
@@ -1443,6 +1490,7 @@ mod tests {
         assert_eq!(perft(&mut b, 2).num_positions, 191);
         assert_eq!(perft(&mut b, 3).num_positions, 2812);
         assert_eq!(perft(&mut b, 4).num_positions, 43238);
+        assert_eq!(perft(&mut b, 5).num_positions, 674624);
     }
 
     #[test]
@@ -1450,6 +1498,9 @@ mod tests {
         let mut b = Board::from_fen("8/2p5/3p4/1P5r/KR3p1k/8/4P1P1/8 b - - 1 2").unwrap();
         assert_eq!(perft(&mut b, 1).num_positions, 15);
         assert_eq!(perft(&mut b, 2).num_positions, 224);
+        assert_eq!(perft(&mut b, 3).num_positions, 3394);
+        assert_eq!(perft(&mut b, 4).num_positions, 52943);
+        assert_eq!(perft(&mut b, 5).num_positions, 868162);
     }
 
     #[test]
@@ -1458,5 +1509,18 @@ mod tests {
         dbg!(b.get_legal_moves());
         assert_eq!(perft(&mut b, 1).num_positions, 13);
         assert_eq!(perft(&mut b, 2).num_positions, 271);
+        assert_eq!(perft(&mut b, 3).num_positions, 4084);
+        assert_eq!(perft(&mut b, 4).num_positions, 76169);
+        assert_eq!(perft(&mut b, 5).num_positions, 1233754);
+    }
+
+    #[test]
+    fn perft_9() {
+        let mut b = Board::from_fen("2r5/1Pp5/3p4/8/KR3p2/6k1/4P1P1/8 w - - 1 5").unwrap();
+        dbg!(b.get_legal_moves());
+        assert_eq!(perft(&mut b, 1).num_positions, 23);
+        assert_eq!(perft(&mut b, 2).num_positions, 324);
+        assert_eq!(perft(&mut b, 3).num_positions, 7164);
+        assert_eq!(perft(&mut b, 4).num_positions, 106510);
     }
 }
