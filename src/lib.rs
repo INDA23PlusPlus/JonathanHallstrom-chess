@@ -114,12 +114,9 @@ impl Default for Board {
     }
 }
 
-fn pos_to_string(pos: (u8, u8)) -> String {
-    let mut res = String::with_capacity(2);
-
-    res.push((b'a' + pos.1) as char);
-    res.push((b'1' + pos.0) as char);
-    res
+fn append_pos_to_string(s: &mut String, pos: (u8, u8)) {
+    s.push((b'a' + pos.1) as char);
+    s.push((b'1' + pos.0) as char);
 }
 
 impl Board {
@@ -358,7 +355,7 @@ impl Board {
         }) {
             let m = self.played_moves.last().unwrap();
             res += " ";
-            res.push_str(&pos_to_string(m.end_piece.pos));
+            append_pos_to_string(&mut res, m.end_piece.pos);
         } else {
             res += " -";
         }
@@ -1340,67 +1337,37 @@ mod tests {
         );
     }
 
-    #[derive(Debug)]
-    struct PerftInfo {
-        num_positions: u64,
-        num_checks: u64,
-        num_captures: u64,
-    }
-
-    fn perft(b: &mut Board, depth: usize) -> PerftInfo {
+    fn perft(b: &mut Board, depth: usize) -> u64 {
         if depth == 0 {
-            PerftInfo {
-                num_positions: 1,
-                num_checks: b.is_in_check() as u64,
-                num_captures: 0,
-            }
+            1
         } else {
-            let mut res = PerftInfo {
-                num_positions: 0,
-                num_checks: 0,
-                num_captures: 0,
-            };
+            let mut res = 0;
             for mv in b.get_legal_moves() {
                 b.play_unchecked(mv);
-                let o = perft(b, depth - 1);
-                res.num_positions += o.num_positions;
-                res.num_captures += o.num_captures;
-                res.num_checks += o.num_checks;
-                res.num_captures += mv.captured_piece.is_some() as u64;
+                res += perft(b, depth - 1);
                 b.undo_last_move();
             }
             res
         }
     }
 
-    fn perft_dbg(b: &mut Board, depth: usize) -> PerftInfo {
+    fn perft_dbg(b: &mut Board, depth: usize) -> u64 {
         if depth == 0 {
-            PerftInfo {
-                num_positions: 1,
-                num_checks: b.is_in_check() as u64,
-                num_captures: 0,
-            }
+            1
         } else {
-            let mut res = PerftInfo {
-                num_positions: 0,
-                num_checks: 0,
-                num_captures: 0,
-            };
+            let mut res = 0;
             let mut dbg_out = Vec::new();
             for mv in b.get_legal_moves() {
                 b.play_unchecked(mv);
                 let o = perft(b, depth - 1);
-                let mut mv_str =
-                    pos_to_string(mv.start_piece.pos) + &pos_to_string(mv.end_piece.pos);
+                let mut mv_str = String::with_capacity(5);
+                append_pos_to_string(&mut mv_str, mv.start_piece.pos);
+                append_pos_to_string(&mut mv_str, mv.end_piece.pos);
                 if mv.end_piece.tp != mv.start_piece.tp {
                     mv_str.push(mv.end_piece.tp.get_repr());
                 }
 
-                dbg_out.push(mv_str + ": " + &o.num_positions.to_string());
-                res.num_positions += o.num_positions;
-                res.num_captures += o.num_captures;
-                res.num_checks += o.num_checks;
-                res.num_captures += mv.captured_piece.is_some() as u64;
+                dbg_out.push(mv_str + ": " + &o.to_string());
                 b.undo_last_move();
             }
             dbg_out.sort();
@@ -1412,100 +1379,100 @@ mod tests {
     #[test]
     fn perft_starting_pos() {
         let mut b = Board::default();
-        assert_eq!(perft(&mut b, 1).num_positions, 20);
-        assert_eq!(perft(&mut b, 2).num_positions, 400);
-        assert_eq!(perft(&mut b, 3).num_positions, 8902);
-        assert_eq!(perft(&mut b, 4).num_positions, 197281);
+        assert_eq!(perft(&mut b, 1), 20);
+        assert_eq!(perft(&mut b, 2), 400);
+        assert_eq!(perft(&mut b, 3), 8902);
+        assert_eq!(perft(&mut b, 4), 197281);
 
         // no castling support yet
-        // assert_eq!(perft(&mut b, 5).num_positions, 4865609);
+        // assert_eq!(perft(&mut b, 5), 4865609);
     }
 
     #[test]
     fn perft_1() {
         // values taken from stockfish
         let mut b = Board::from_fen("8/KR4rk/8/8/8/8/8/8 w - - 0 1").unwrap();
-        assert_eq!(perft(&mut b, 1).num_positions, 9);
-        assert_eq!(perft(&mut b, 2).num_positions, 65);
-        assert_eq!(perft(&mut b, 3).num_positions, 717);
-        assert_eq!(perft(&mut b, 4).num_positions, 8504);
-        assert_eq!(perft(&mut b, 5).num_positions, 113900);
+        assert_eq!(perft(&mut b, 1), 9);
+        assert_eq!(perft(&mut b, 2), 65);
+        assert_eq!(perft(&mut b, 3), 717);
+        assert_eq!(perft(&mut b, 4), 8504);
+        assert_eq!(perft(&mut b, 5), 113900);
     }
 
     #[test]
     fn perft_2() {
         let mut b = Board::from_fen("8/KR4rk/8/5N2/8/8/8/8 w - - 0 1").unwrap();
-        assert_eq!(perft(&mut b, 1).num_positions, 17);
-        assert_eq!(perft(&mut b, 2).num_positions, 122);
-        assert_eq!(perft(&mut b, 3).num_positions, 1909);
-        assert_eq!(perft(&mut b, 4).num_positions, 19978);
-        assert_eq!(perft(&mut b, 5).num_positions, 355397);
+        assert_eq!(perft(&mut b, 1), 17);
+        assert_eq!(perft(&mut b, 2), 122);
+        assert_eq!(perft(&mut b, 3), 1909);
+        assert_eq!(perft(&mut b, 4), 19978);
+        assert_eq!(perft(&mut b, 5), 355397);
     }
 
     #[test]
     fn perft_3() {
         let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1bQ2/8/4R3 w - - 0 1").unwrap();
-        assert_eq!(perft(&mut b, 1).num_positions, 48);
-        assert_eq!(perft(&mut b, 2).num_positions, 1277);
-        assert_eq!(perft(&mut b, 3).num_positions, 53702);
-        assert_eq!(perft(&mut b, 4).num_positions, 1373576);
+        assert_eq!(perft(&mut b, 1), 48);
+        assert_eq!(perft(&mut b, 2), 1277);
+        assert_eq!(perft(&mut b, 3), 53702);
+        assert_eq!(perft(&mut b, 4), 1373576);
     }
 
     #[test]
     fn perft_4() {
         let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1bQ2/5P2/4R3 w - - 0 1").unwrap();
-        assert_eq!(perft(&mut b, 1).num_positions, 47);
-        assert_eq!(perft(&mut b, 2).num_positions, 1201);
-        assert_eq!(perft(&mut b, 3).num_positions, 50014);
-        assert_eq!(perft(&mut b, 4).num_positions, 1239643);
+        assert_eq!(perft(&mut b, 1), 47);
+        assert_eq!(perft(&mut b, 2), 1201);
+        assert_eq!(perft(&mut b, 3), 50014);
+        assert_eq!(perft(&mut b, 4), 1239643);
     }
 
     #[test]
     fn perft_5() {
         let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1PQ2/8/4R3 b - - 0 2").unwrap();
-        assert_eq!(perft(&mut b, 1).num_positions, 24);
-        assert_eq!(perft(&mut b, 2).num_positions, 1053);
-        assert_eq!(perft(&mut b, 3).num_positions, 20940);
+        assert_eq!(perft(&mut b, 1), 24);
+        assert_eq!(perft(&mut b, 2), 1053);
+        assert_eq!(perft(&mut b, 3), 20940);
     }
 
     #[test]
     fn perft_6() {
         let mut b = Board::from_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1").unwrap();
-        assert_eq!(perft(&mut b, 1).num_positions, 14);
-        assert_eq!(perft(&mut b, 2).num_positions, 191);
-        assert_eq!(perft(&mut b, 3).num_positions, 2812);
-        assert_eq!(perft(&mut b, 4).num_positions, 43238);
-        assert_eq!(perft(&mut b, 5).num_positions, 674624);
+        assert_eq!(perft(&mut b, 1), 14);
+        assert_eq!(perft(&mut b, 2), 191);
+        assert_eq!(perft(&mut b, 3), 2812);
+        assert_eq!(perft(&mut b, 4), 43238);
+        assert_eq!(perft(&mut b, 5), 674624);
     }
 
     #[test]
     fn perft_7() {
         let mut b = Board::from_fen("8/2p5/3p4/1P5r/KR3p1k/8/4P1P1/8 b - - 1 2").unwrap();
-        assert_eq!(perft(&mut b, 1).num_positions, 15);
-        assert_eq!(perft(&mut b, 2).num_positions, 224);
-        assert_eq!(perft(&mut b, 3).num_positions, 3394);
-        assert_eq!(perft(&mut b, 4).num_positions, 52943);
-        assert_eq!(perft(&mut b, 5).num_positions, 868162);
+        assert_eq!(perft(&mut b, 1), 15);
+        assert_eq!(perft(&mut b, 2), 224);
+        assert_eq!(perft(&mut b, 3), 3394);
+        assert_eq!(perft(&mut b, 4), 52943);
+        assert_eq!(perft(&mut b, 5), 868162);
     }
 
     #[test]
     fn perft_8() {
         let mut b = Board::from_fen("8/2p5/3p4/1P5r/KR3p2/6k1/4P1P1/8 w - - 2 3").unwrap();
         dbg!(b.get_legal_moves());
-        assert_eq!(perft(&mut b, 1).num_positions, 13);
-        assert_eq!(perft(&mut b, 2).num_positions, 271);
-        assert_eq!(perft(&mut b, 3).num_positions, 4084);
-        assert_eq!(perft(&mut b, 4).num_positions, 76169);
-        assert_eq!(perft(&mut b, 5).num_positions, 1233754);
+        assert_eq!(perft(&mut b, 1), 13);
+        assert_eq!(perft(&mut b, 2), 271);
+        assert_eq!(perft(&mut b, 3), 4084);
+        assert_eq!(perft(&mut b, 4), 76169);
+        assert_eq!(perft(&mut b, 5), 1233754);
     }
 
     #[test]
     fn perft_9() {
         let mut b = Board::from_fen("2r5/1Pp5/3p4/8/KR3p2/6k1/4P1P1/8 w - - 1 5").unwrap();
         dbg!(b.get_legal_moves());
-        assert_eq!(perft(&mut b, 1).num_positions, 23);
-        assert_eq!(perft(&mut b, 2).num_positions, 324);
-        assert_eq!(perft(&mut b, 3).num_positions, 7164);
-        assert_eq!(perft(&mut b, 4).num_positions, 106510);
+        assert_eq!(perft(&mut b, 1), 23);
+        assert_eq!(perft(&mut b, 2), 324);
+        assert_eq!(perft(&mut b, 3), 7164);
+        assert_eq!(perft(&mut b, 4), 106510);
     }
 }
