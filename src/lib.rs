@@ -87,6 +87,14 @@ pub struct Board {
 }
 
 impl Default for Board {
+    /// returns standard default position for chess
+    ///
+    /// ```
+    /// use jonathan_hallstrom_chess::*;
+    ///
+    /// let b = Board::default();
+    /// assert_eq!(b.get_legal_moves().len(), 20);
+    /// ```
     fn default() -> Self {
         Self::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap()
     }
@@ -231,10 +239,54 @@ impl Board {
         if (moves % 2 == 1) != (turn == 'w') {
             return None;
         }
-
         board.played_moves = (0..((moves - 1) % 2))
             .map(|_| Move::unknown_move())
             .collect();
+
+        if en_passant_target != "-" {
+            if !(b'a'..=b'h').contains(&en_passant_target.bytes().nth(0)?) {
+                return None;
+            }
+            if !(b'1'..=b'8').contains(&en_passant_target.bytes().nth(1)?) {
+                return None;
+            }
+            let pos = (
+                en_passant_target.bytes().nth(1).unwrap() - b'1',
+                en_passant_target.bytes().nth(0).unwrap() - b'a',
+            );
+
+            if board.played_moves.is_empty() {
+                board.played_moves.push(Move::unknown_move());
+                board.played_moves.push(Move::unknown_move());
+            }
+            if pos.0 != 2 && pos.0 != 5 {
+                return None;
+            }
+            let col = if pos.0 == 3 {
+                Color::White
+            } else {
+                Color::Black
+            };
+            let start_row = if pos.0 == 2 { 1 } else { 6 };
+            let end_row = if pos.0 == 2 { 3 } else { 4 };
+
+            let en_passant_move = Move {
+                start_piece: Piece {
+                    tp: PieceType::Pawn,
+                    pos: (start_row, pos.1),
+                    col,
+                },
+                end_piece: Piece {
+                    tp: PieceType::Pawn,
+                    pos: (end_row, pos.1),
+                    col,
+                },
+                captured_piece: None,
+            };
+
+            *board.played_moves.last_mut().unwrap() = en_passant_move;
+        }
+
         Some(board)
     }
 
@@ -356,6 +408,78 @@ fn pos_to_idx(pos: (u8, u8)) -> u8 {
 }
 
 impl Board {
+    pub fn is_legal_move(&self, m: Move) -> bool {
+        self.get_legal_moves().iter().contains(&m)
+    }
+
+    /// If the provided move is valid, the state of the board will be the result of playing the
+    /// given move, otherwise it will return an error corresponding to the way in which the move is
+    /// invalid
+    pub fn play_move(&mut self, m: Move) -> Result<(), MoveError> {
+        if self.is_out_of_bounds(m) {
+            return Err(MoveError::OutOfBounds);
+        }
+
+        if self.is_self_capture(m) {
+            return Err(MoveError::SelfCapture);
+        }
+
+        if self.is_self_check(m) {
+            return Err(MoveError::SelfCheck);
+        }
+
+        if self.is_capturing_empty_square(m) {
+            return Err(MoveError::CapturingEmptySquare);
+        };
+
+        self.play_unchecked(m);
+        Ok(())
+    }
+
+    // Undoes last played move, if there is no such move it returns `None`
+    pub fn undo_last_move(&mut self) -> Option<()> {
+        let mv = *self.played_moves.last()?;
+        if mv == Move::unknown_move() {
+            return None;
+        }
+        self.played_moves.pop();
+
+        // have to do this horribleness to deal with ownership
+        let curr_player = self.get_curr_player();
+        let is_white_to_play = curr_player == Color::White;
+
+        let (curr_player_pieces, opponent_pieces) = if is_white_to_play {
+            (&mut self.white_pieces, &mut self.black_pieces)
+        } else {
+            (&mut self.black_pieces, &mut self.white_pieces)
+        };
+
+        let (curr_player_bitboard, opponent_bitboard) = if is_white_to_play {
+            (
+                &mut self.white_piece_bitboard,
+                &mut self.black_piece_bitboard,
+            )
+        } else {
+            (
+                &mut self.black_piece_bitboard,
+                &mut self.white_piece_bitboard,
+            )
+        };
+
+        if let Some(captured) = mv.captured_piece {
+            opponent_bitboard.set(captured.pos);
+            opponent_pieces.insert(captured);
+        }
+
+        curr_player_bitboard.clear(mv.end_piece.pos);
+        curr_player_bitboard.set(mv.start_piece.pos);
+
+        curr_player_pieces.remove(&mv.end_piece);
+        curr_player_pieces.insert(mv.start_piece);
+
+        Some(())
+    }
+
     // Returns an enum representing the current player, that is, White or Black
     pub fn get_curr_player(&self) -> Color {
         match self.played_moves.len() % 2 {
@@ -369,6 +493,21 @@ impl Board {
         self.get_all_moves()
             .iter()
             .any(|x| x.captured_piece.is_some_and(|c| c.tp == PieceType::King))
+    }
+
+    pub fn get_legal_moves(&self) -> Vec<Move> {
+        let mut cp = self.clone();
+        let (curr_player_pieces, _) = self.get_pieces();
+        curr_player_pieces
+            .iter()
+            .flat_map(|p| self.get_all_moves_for_piece(*p))
+            .filter(|m| {
+                cp.play_unchecked(*m);
+                let res = !cp.is_in_check() && !self.is_self_capture(*m);
+                cp.undo_last_move();
+                res
+            })
+            .collect()
     }
 
     fn is_white_to_play(&self) -> bool {
@@ -498,78 +637,6 @@ impl Board {
         curr_player_bitboard.set(m.end_piece.pos);
 
         self.played_moves.push(m);
-    }
-
-    pub fn is_legal_move(&self, m: Move) -> bool {
-        self.get_legal_moves().iter().contains(&m)
-    }
-
-    // If the provided move is valid, the state of the board will be the result of playing the
-    // given move, otherwise it will return an error corresponding to the way in which the move is
-    // invalid
-    pub fn play_move(&mut self, m: Move) -> Result<(), MoveError> {
-        if self.is_out_of_bounds(m) {
-            return Err(MoveError::OutOfBounds);
-        }
-
-        if self.is_self_capture(m) {
-            return Err(MoveError::SelfCapture);
-        }
-
-        if self.is_self_check(m) {
-            return Err(MoveError::SelfCheck);
-        }
-
-        if self.is_capturing_empty_square(m) {
-            return Err(MoveError::CapturingEmptySquare);
-        };
-
-        self.play_unchecked(m);
-        Ok(())
-    }
-
-    // Undoes last played move, if there is no such move it returns `None`
-    pub fn undo_last_move(&mut self) -> Option<()> {
-        let mv = *self.played_moves.last()?;
-        if mv == Move::unknown_move() {
-            return None;
-        }
-        self.played_moves.pop();
-
-        // have to do this horribleness to deal with ownership
-        let curr_player = self.get_curr_player();
-        let is_white_to_play = curr_player == Color::White;
-
-        let (curr_player_pieces, opponent_pieces) = if is_white_to_play {
-            (&mut self.white_pieces, &mut self.black_pieces)
-        } else {
-            (&mut self.black_pieces, &mut self.white_pieces)
-        };
-
-        let (curr_player_bitboard, opponent_bitboard) = if is_white_to_play {
-            (
-                &mut self.white_piece_bitboard,
-                &mut self.black_piece_bitboard,
-            )
-        } else {
-            (
-                &mut self.black_piece_bitboard,
-                &mut self.white_piece_bitboard,
-            )
-        };
-
-        if let Some(captured) = mv.captured_piece {
-            opponent_bitboard.set(captured.pos);
-            opponent_pieces.insert(captured);
-        }
-
-        curr_player_bitboard.clear(mv.end_piece.pos);
-        curr_player_bitboard.set(mv.start_piece.pos);
-
-        curr_player_pieces.remove(&mv.end_piece);
-        curr_player_pieces.insert(mv.start_piece);
-
-        Some(())
     }
 
     // helper for regular moves, doesn't work for promotions or castling
@@ -763,10 +830,10 @@ impl Board {
             if let Some(m) = self.get_move(p, ((p.pos.0 as i8 + dr) as u8, p.pos.1)) {
                 if m.captured_piece.is_none() {
                     res.push(m);
-                }
-                if let Some(m) = self.get_move(p, ((p.pos.0 as i8 + 2 * dr) as u8, p.pos.1)) {
-                    if m.captured_piece.is_none() {
-                        res.push(m);
+                    if let Some(m) = self.get_move(p, ((p.pos.0 as i8 + 2 * dr) as u8, p.pos.1)) {
+                        if m.captured_piece.is_none() {
+                            res.push(m);
+                        }
                     }
                 }
             }
@@ -856,18 +923,8 @@ impl Board {
             .flat_map(|p| self.get_all_moves_for_piece(*p))
             .collect()
     }
-
-    pub fn get_legal_moves(&self) -> Vec<Move> {
-        let (curr_player_pieces, _) = self.get_pieces();
-        curr_player_pieces
-            .iter()
-            .flat_map(|p| self.get_legal_moves_for_piece(*p))
-            .collect()
-    }
 }
 
-// this is terrible testing but I wan't to get this done ASAP
-// and it's just gonna have to do for now
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1242,6 +1299,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fen_en_passant() {
+        let mut b =
+            Board::from_fen("rnbqkbnr/ppp2ppp/4p3/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3")
+                .unwrap();
+        b.undo_last_move();
+        assert_eq!(
+            b,
+            Board::from_fen("rnbqkbnr/pppp1ppp/4p3/4P3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 2")
+                .unwrap()
+        );
+    }
+
     #[derive(Debug)]
     struct PerftInfo {
         num_positions: u64,
@@ -1316,6 +1386,7 @@ mod tests {
         assert_eq!(perft(&mut b, 1).num_positions, 20);
         assert_eq!(perft(&mut b, 2).num_positions, 400);
         assert_eq!(perft(&mut b, 3).num_positions, 8902);
+        assert_eq!(perft(&mut b, 4).num_positions, 197281);
     }
 
     #[test]
@@ -1325,24 +1396,67 @@ mod tests {
         assert_eq!(perft(&mut b, 1).num_positions, 9);
         assert_eq!(perft(&mut b, 2).num_positions, 65);
         assert_eq!(perft(&mut b, 3).num_positions, 717);
+        assert_eq!(perft(&mut b, 4).num_positions, 8504);
+        assert_eq!(perft(&mut b, 5).num_positions, 113900);
+    }
+
+    #[test]
+    fn perft_2() {
         let mut b = Board::from_fen("8/KR4rk/8/5N2/8/8/8/8 w - - 0 1").unwrap();
         assert_eq!(perft(&mut b, 1).num_positions, 17);
         assert_eq!(perft(&mut b, 2).num_positions, 122);
         assert_eq!(perft(&mut b, 3).num_positions, 1909);
+        assert_eq!(perft(&mut b, 4).num_positions, 19978);
+        assert_eq!(perft(&mut b, 5).num_positions, 355397);
+    }
+
+    #[test]
+    fn perft_3() {
         let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1bQ2/8/4R3 w - - 0 1").unwrap();
         assert_eq!(perft(&mut b, 1).num_positions, 48);
         assert_eq!(perft(&mut b, 2).num_positions, 1277);
         assert_eq!(perft(&mut b, 3).num_positions, 53702);
+        assert_eq!(perft(&mut b, 4).num_positions, 1373576);
+    }
+
+    #[test]
+    fn perft_4() {
         let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1bQ2/5P2/4R3 w - - 0 1").unwrap();
         assert_eq!(perft(&mut b, 1).num_positions, 47);
         assert_eq!(perft(&mut b, 2).num_positions, 1201);
         assert_eq!(perft(&mut b, 3).num_positions, 50014);
+        assert_eq!(perft(&mut b, 4).num_positions, 1239643);
+    }
+
+    #[test]
+    fn perft_5() {
         let mut b = Board::from_fen("8/KR4rk/3n4/2N5/2B5/2n1PQ2/8/4R3 b - - 0 2").unwrap();
         assert_eq!(perft(&mut b, 1).num_positions, 24);
         assert_eq!(perft(&mut b, 2).num_positions, 1053);
         assert_eq!(perft(&mut b, 3).num_positions, 20940);
+    }
+
+    #[test]
+    fn perft_6() {
         let mut b = Board::from_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1").unwrap();
-        assert_eq!(dbg!(perft(&mut b, 1)).num_positions, 14);
-        assert_eq!(dbg!(perft(&mut b, 2)).num_positions, 191);
+        assert_eq!(perft(&mut b, 1).num_positions, 14);
+        assert_eq!(perft(&mut b, 2).num_positions, 191);
+        assert_eq!(perft(&mut b, 3).num_positions, 2812);
+        assert_eq!(perft(&mut b, 4).num_positions, 43238);
+    }
+
+    #[test]
+    fn perft_7() {
+        let mut b = Board::from_fen("8/2p5/3p4/1P5r/KR3p1k/8/4P1P1/8 b - - 1 2").unwrap();
+        assert_eq!(perft(&mut b, 1).num_positions, 15);
+        assert_eq!(perft(&mut b, 2).num_positions, 224);
+    }
+
+    #[test]
+    fn perft_8() {
+        let mut b = Board::from_fen("8/2p5/3p4/1P5r/KR3p2/6k1/4P1P1/8 w - - 2 3").unwrap();
+        dbg!(b.get_legal_moves());
+        assert_eq!(perft(&mut b, 1).num_positions, 13);
+        assert_eq!(perft(&mut b, 2).num_positions, 271);
     }
 }
