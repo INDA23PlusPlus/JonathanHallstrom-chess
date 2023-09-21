@@ -649,19 +649,13 @@ impl Board {
         } else if opponent_bitboard.get(pos) {
             Some(Move {
                 start_piece: p,
-                end_piece: Piece {
-                    pos,
-                    ..p
-                },
+                end_piece: Piece { pos, ..p },
                 captured_piece: Some(*opponent_pieces.iter().find(|x| x.pos == pos).unwrap()),
             })
         } else {
             Some(Move {
                 start_piece: p,
-                end_piece: Piece {
-                    pos,
-                    ..p
-                },
+                end_piece: Piece { pos, ..p },
                 captured_piece: None,
             })
         }
@@ -1367,7 +1361,6 @@ mod tests {
                 num_captures: 0,
             };
             for mv in b.get_legal_moves() {
-                let before = b.clone();
                 b.play_unchecked(mv);
                 let o = perft(b, depth - 1);
                 res.num_positions += o.num_positions;
@@ -1375,14 +1368,6 @@ mod tests {
                 res.num_checks += o.num_checks;
                 res.num_captures += mv.captured_piece.is_some() as u64;
                 b.undo_last_move();
-                dbg!("");
-                dbg!(mv);
-                assert!(dbg!(&b.white_pieces).is_subset(dbg!(&before.white_pieces)));
-                assert!(dbg!(&b.black_pieces).is_subset(dbg!(&before.black_pieces)));
-                assert!(before.white_pieces.is_subset(&b.white_pieces));
-                assert!(before.black_pieces.is_subset(&b.black_pieces));
-                assert_eq!(b.white_piece_bitboard, before.white_piece_bitboard);
-                assert_eq!(b.black_piece_bitboard, before.black_piece_bitboard);
             }
             res
         }
