@@ -92,7 +92,6 @@ impl Move {
     /// type promoted to
     /// ```
     /// # use jonathan_hallstrom_chess::*;
-    ///
     /// let board = Board::from_fen("8/8/8/8/8/k6P/8/KBr5 w - - 0 1").unwrap();
     ///
     /// // only legal move is moving the pawn up one step
@@ -126,7 +125,6 @@ impl Default for Board {
     ///
     /// ```
     /// # use jonathan_hallstrom_chess::*;
-    ///
     /// let b = Board::default();
     /// assert_eq!(b.get_legal_moves().len(), 20);
     /// ```
@@ -162,14 +160,6 @@ impl Board {
                 self.black_piece_bitboard.set(p.pos);
             }
         }
-    }
-
-    pub fn get_all_pieces(&self) -> HashSet<Piece> {
-        self.white_pieces
-            .iter()
-            .chain(self.black_pieces.iter())
-            .copied()
-            .collect()
     }
 
     pub fn from_fen(fen_str: &str) -> Option<Board> {
@@ -1362,13 +1352,15 @@ mod tests {
         if depth == 0 {
             1
         } else {
-            let mut res = 0;
-            for mv in b.get_legal_moves() {
-                b.play_unchecked(mv);
-                res += perft(b, depth - 1);
-                b.undo_last_move();
-            }
-            res
+            b.get_legal_moves()
+                .iter()
+                .map(|mv| {
+                    b.play_move(*mv);
+                    let res = perft(b, depth - 1);
+                    b.undo_last_move();
+                    res
+                })
+                .sum()
         }
     }
 
