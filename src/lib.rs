@@ -2,6 +2,8 @@
 use std::{collections::HashSet, convert::identity};
 
 use itertools::*;
+use smallvec::{smallvec, SmallVec};
+use tinyset::setu32::SetU32;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PieceType {
@@ -62,6 +64,18 @@ pub struct Piece {
     tp: PieceType,
     pos: (u8, u8),
     col: Color,
+}
+
+impl Into<u32> for Piece {
+    fn into(self) -> u32 {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl From<u32> for Piece {
+    fn from(value: u32) -> Piece {
+        unsafe { std::mem::transmute(value) }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -138,13 +152,13 @@ impl Move {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Board {
-    white_pieces: HashSet<Piece>,
-    black_pieces: HashSet<Piece>,
+    white_pieces: SetU32,
+    black_pieces: SetU32,
 
     white_piece_bitboard: Bitboard,
     black_piece_bitboard: Bitboard,
 
-    played_moves: Vec<Move>,
+    played_moves: SmallVec<[Move; 32]>,
 }
 
 impl Default for Board {
@@ -168,22 +182,22 @@ fn append_pos_to_string(s: &mut String, pos: (u8, u8)) {
 impl Board {
     fn empty() -> Board {
         Board {
-            white_pieces: HashSet::new(),
-            black_pieces: HashSet::new(),
+            white_pieces: SetU32::with_capacity_and_max(16, 64),
+            black_pieces: SetU32::with_capacity_and_max(16, 64),
             white_piece_bitboard: Bitboard(0),
             black_piece_bitboard: Bitboard(0),
-            played_moves: vec![],
+            played_moves: smallvec![],
         }
     }
 
     fn add_piece(&mut self, p: Piece) {
         match p.col {
             Color::White => {
-                self.white_pieces.insert(p);
+                self.white_pieces.insert(p.into());
                 self.white_piece_bitboard.set(p.pos);
             }
             Color::Black => {
-                self.black_pieces.insert(p);
+                self.black_pieces.insert(p.into());
                 self.black_piece_bitboard.set(p.pos);
             }
         }
@@ -355,20 +369,28 @@ impl Board {
                 let c = j;
 
                 if self.white_piece_bitboard.get((r, c)) {
-                    let p = self.white_pieces.iter().find(|p| p.pos == (r, c)).unwrap();
+                    let p = self
+                        .white_pieces
+                        .iter()
+                        .find(|p| Piece::from(*p).pos == (r, c))
+                        .unwrap();
                     let empty_to_add = ((c as i8) - last - 1) as u8;
                     if empty_to_add >= 1 {
                         res.push((empty_to_add + b'0') as char);
                     }
-                    res.push(get_repr(*p));
+                    res.push(get_repr(p.into()));
                     last = c as i8;
                 } else if self.black_piece_bitboard.get((r, c)) {
-                    let p = self.black_pieces.iter().find(|p| p.pos == (r, c)).unwrap();
+                    let p = self
+                        .black_pieces
+                        .iter()
+                        .find(|p| Piece::from(*p).pos == (r, c))
+                        .unwrap();
                     let empty_to_add = ((c as i8) - last - 1) as u8;
                     if empty_to_add >= 1 {
                         res.push((empty_to_add + b'0') as char);
                     }
-                    res.push(get_repr(*p));
+                    res.push(get_repr(p.into()));
                     last = c as i8;
                 }
             }
@@ -506,14 +528,14 @@ impl Board {
 
         if let Some(captured) = mv.captured_piece {
             opponent_bitboard.set(captured.pos);
-            opponent_pieces.insert(captured);
+            opponent_pieces.insert(captured.into());
         }
 
         curr_player_bitboard.clear(mv.end_piece.pos);
         curr_player_bitboard.set(mv.start_piece.pos);
 
-        curr_player_pieces.remove(&mv.end_piece);
-        curr_player_pieces.insert(mv.start_piece);
+        curr_player_pieces.remove(mv.end_piece.into());
+        curr_player_pieces.insert(mv.start_piece.into());
 
         Some(())
     }
@@ -538,7 +560,7 @@ impl Board {
         let (curr_player_pieces, _) = self.get_pieces();
         curr_player_pieces
             .iter()
-            .flat_map(|p| self.get_all_moves_for_piece(*p))
+            .flat_map(|p| self.get_all_moves_for_piece(p.into()))
             .filter(|m| {
                 cp.play_unchecked(*m);
                 let res = !cp.is_in_check() && !self.is_self_capture(*m);
@@ -610,7 +632,7 @@ impl Board {
         }
     }
 
-    fn get_pieces(&self) -> (&HashSet<Piece>, &HashSet<Piece>) {
+    fn get_pieces(&self) -> (&SetU32, &SetU32) {
         let is_white_to_play = self.is_white_to_play();
         if is_white_to_play {
             (&self.white_pieces, &self.black_pieces)
@@ -619,7 +641,7 @@ impl Board {
         }
     }
 
-    fn get_pieces_mut(&mut self) -> (&mut HashSet<Piece>, &mut HashSet<Piece>) {
+    fn get_pieces_mut(&mut self) -> (&mut SetU32, &mut SetU32) {
         let is_white_to_play = self.is_white_to_play();
         if is_white_to_play {
             (&mut self.white_pieces, &mut self.black_pieces)
@@ -651,22 +673,25 @@ impl Board {
             )
         };
 
-        let moved_piece = *curr_player_pieces
-            .iter()
-            .find(|x| **x == m.start_piece)
-            .unwrap();
+        let moved_piece = Piece::from(
+            curr_player_pieces
+                .iter()
+                .find(|x| *x == m.start_piece.into())
+                .unwrap(),
+        );
 
         if let Some(captured_piece) = m.captured_piece {
-            if let Some(captured_piece) = opponent_pieces.iter().find(|x| **x == captured_piece) {
-                let captured_piece = *captured_piece;
+            let captured_piece = opponent_pieces.iter().find(|x| *x == captured_piece.into());
 
-                opponent_pieces.retain(|x| *x != captured_piece);
+            if captured_piece.is_some() {
+                let captured_piece: Piece = captured_piece.unwrap().into();
+                opponent_pieces.remove(captured_piece.into());
                 opponent_bitboard.clear(captured_piece.pos);
             }
         }
 
-        curr_player_pieces.retain(|x| *x != moved_piece);
-        curr_player_pieces.insert(m.end_piece);
+        curr_player_pieces.remove(moved_piece.into());
+        curr_player_pieces.insert(m.end_piece.into());
 
         curr_player_bitboard.clear(m.start_piece.pos);
         curr_player_bitboard.set(m.end_piece.pos);
@@ -685,7 +710,13 @@ impl Board {
             Some(Move {
                 start_piece: p,
                 end_piece: Piece { pos, ..p },
-                captured_piece: Some(*opponent_pieces.iter().find(|x| x.pos == pos).unwrap()),
+                captured_piece: Some(
+                    opponent_pieces
+                        .iter()
+                        .find(|x| Piece::from(*x).pos == pos)
+                        .unwrap()
+                        .into(),
+                ),
             })
         } else {
             Some(Move {
@@ -983,7 +1014,7 @@ impl Board {
         let (curr_player_pieces, _) = self.get_pieces();
         curr_player_pieces
             .iter()
-            .flat_map(|p| self.get_all_moves_for_piece(*p))
+            .flat_map(|p| self.get_all_moves_for_piece(p.into()))
             .collect()
     }
 }
@@ -1137,7 +1168,7 @@ mod tests {
             b.play_move(m);
             dbg!(&b.white_pieces);
             assert_eq!(
-                dbg!(b.get_all_moves_for_piece(*b.white_pieces.iter().next().unwrap())).len(),
+                dbg!(b.get_all_moves_for_piece(b.white_pieces.iter().next().unwrap().into())).len(),
                 1
             );
             b.undo_last_move();
@@ -1375,19 +1406,34 @@ mod tests {
         );
     }
 
+    use rayon::prelude::*;
+
     fn perft(b: &mut Board, depth: usize) -> u64 {
         if depth == 0 {
             1
         } else {
-            b.get_legal_moves()
-                .iter()
-                .map(|mv| {
-                    b.play_move(*mv);
-                    let res = perft(b, depth - 1);
-                    b.undo_last_move();
-                    res
-                })
-                .sum()
+            if depth > 2 {
+                b.get_legal_moves()
+                    .par_iter()
+                    .map(|mv| {
+                        let mut cp = b.clone();
+                        cp.play_move(*mv);
+                        let res = perft(&mut cp, depth - 1);
+                        cp.undo_last_move();
+                        res
+                    })
+                    .sum()
+            } else {
+                b.get_legal_moves()
+                    .iter()
+                    .map(|mv| {
+                        b.play_move(*mv);
+                        let res = perft(b, depth - 1);
+                        b.undo_last_move();
+                        res
+                    })
+                    .sum()
+            }
         }
     }
 
