@@ -87,6 +87,27 @@ impl Move {
             captured_piece: None,
         }
     }
+
+    /// returns move represented as start and end squares, and possibly a letter indicating the
+    /// type promoted to
+    /// ```
+    /// # use jonathan_hallstrom_chess::*;
+    ///
+    /// let board = Board::from_fen("8/8/8/8/8/k6P/8/KBr5 w - - 0 1").unwrap();
+    ///
+    /// // only legal move is moving the pawn up one step
+    /// assert_eq!(&board.get_legal_moves().iter().next().unwrap().to_algebraic_notation(), "h3h4");
+    ///
+    /// ```
+    pub fn to_algebraic_notation(&self) -> String {
+        let mut res = String::with_capacity(5);
+        append_pos_to_string(&mut res, self.start_piece.pos);
+        append_pos_to_string(&mut res, self.end_piece.pos);
+        if self.end_piece.tp != self.start_piece.tp {
+            res.push(self.end_piece.tp.get_repr());
+        }
+        res
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1360,14 +1381,8 @@ mod tests {
             for mv in b.get_legal_moves() {
                 b.play_unchecked(mv);
                 let o = perft(b, depth - 1);
-                let mut mv_str = String::with_capacity(5);
-                append_pos_to_string(&mut mv_str, mv.start_piece.pos);
-                append_pos_to_string(&mut mv_str, mv.end_piece.pos);
-                if mv.end_piece.tp != mv.start_piece.tp {
-                    mv_str.push(mv.end_piece.tp.get_repr());
-                }
 
-                dbg_out.push(mv_str + ": " + &o.to_string());
+                dbg_out.push(mv.to_algebraic_notation() + ": " + &o.to_string());
                 b.undo_last_move();
             }
             dbg_out.sort();
