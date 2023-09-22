@@ -72,6 +72,25 @@ pub struct Move {
 }
 
 impl Move {
+    /// returns whether move is a capture
+    pub fn is_capture(&self) -> bool {
+        self.captured_piece.is_some()
+    }
+
+    /// returns whether move is a promotion
+    pub fn is_promotion(&self) -> bool {
+        self.end_piece.tp != self.start_piece.tp
+    }
+
+    /// if move is a promotion, returns the type of the piece promoted to, otherwise returns None
+    pub fn get_promoted_type(&self) -> Option<PieceType> {
+        if self.is_promotion() {
+            Some(self.end_piece.tp)
+        } else {
+            None
+        }
+    }
+
     fn unknown_move() -> Move {
         Move {
             start_piece: Piece {
@@ -93,10 +112,18 @@ impl Move {
     /// ```
     /// # use jonathan_hallstrom_chess::*;
     /// let board = Board::from_fen("8/8/8/8/8/k6P/8/KBr5 w - - 0 1").unwrap();
-    ///
+    /// let mv = *board.get_legal_moves().first().unwrap();
     /// // only legal move is moving the pawn up one step
-    /// assert_eq!(&board.get_legal_moves().iter().next().unwrap().to_algebraic_notation(), "h3h4");
+    /// assert_eq!(&mv.to_algebraic_notation(), "h3h4");
     ///
+    /// ```
+    /// ```
+    /// # use jonathan_hallstrom_chess::*;
+    /// let board = Board::from_fen("8/7P/8/8/8/k7/8/KBr5 w - - 0 1").unwrap();
+    /// let mv = *board.get_legal_moves().first().unwrap();
+    /// // all legal moves are promotions of the pawn on h7
+    /// assert!(&mv.is_promotion());
+    /// assert!(&mv.to_algebraic_notation().starts_with("h7h8"));
     /// ```
     pub fn to_algebraic_notation(&self) -> String {
         let mut res = String::with_capacity(5);
