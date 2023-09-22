@@ -104,7 +104,7 @@ impl Default for Board {
     /// returns standard default position for chess
     ///
     /// ```
-    /// use jonathan_hallstrom_chess::*;
+    /// # use jonathan_hallstrom_chess::*;
     ///
     /// let b = Board::default();
     /// assert_eq!(b.get_legal_moves().len(), 20);
@@ -1397,6 +1397,7 @@ mod tests {
         assert_eq!(perft(&mut b, 3), 717);
         assert_eq!(perft(&mut b, 4), 8504);
         assert_eq!(perft(&mut b, 5), 113900);
+        assert_eq!(perft(&mut b, 6), 1628738);
     }
 
     #[test]
@@ -1433,6 +1434,7 @@ mod tests {
         assert_eq!(perft(&mut b, 1), 24);
         assert_eq!(perft(&mut b, 2), 1053);
         assert_eq!(perft(&mut b, 3), 20940);
+        assert_eq!(perft(&mut b, 4), 928281);
     }
 
     #[test]
@@ -1474,5 +1476,6 @@ mod tests {
         assert_eq!(perft(&mut b, 2), 324);
         assert_eq!(perft(&mut b, 3), 7164);
         assert_eq!(perft(&mut b, 4), 106510);
+        assert_eq!(perft(&mut b, 5), 2372502);
     }
 }
