@@ -66,9 +66,9 @@ pub struct Piece {
     col: Color,
 }
 
-impl Into<u32> for Piece {
-    fn into(self) -> u32 {
-        unsafe { std::mem::transmute(self) }
+impl From<Piece> for u32 {
+    fn from(val: Piece) -> Self {
+        unsafe { std::mem::transmute(val) }
     }
 }
 
@@ -304,15 +304,15 @@ impl Board {
             .collect();
 
         if en_passant_target != "-" {
-            if !(b'a'..=b'h').contains(&en_passant_target.bytes().nth(0)?) {
+            if !(b'a'..=b'h').contains(&en_passant_target.as_bytes().get(0).copied()?) {
                 return None;
             }
-            if !(b'1'..=b'8').contains(&en_passant_target.bytes().nth(1)?) {
+            if !(b'1'..=b'8').contains(&en_passant_target.as_bytes().get(1).copied()?) {
                 return None;
             }
             let pos = (
-                en_passant_target.bytes().nth(1).unwrap() - b'1',
-                en_passant_target.bytes().nth(0).unwrap() - b'a',
+                en_passant_target.as_bytes()[1] - b'1',
+                en_passant_target.as_bytes()[0] - b'a',
             );
 
             if board.played_moves.is_empty() {
@@ -395,7 +395,7 @@ impl Board {
                 }
             }
             if last != 7 {
-                res.push((b'0' as i8 + 7 as i8 - last) as u8 as char);
+                res.push((b'0' as i8 + 7_i8 - last) as u8 as char);
             }
             if i < 7 {
                 res += "/";
@@ -959,26 +959,20 @@ impl Board {
         }
 
         if let Some(last_move) = self.played_moves.last() {
-            if last_move.end_piece.tp == PieceType::Pawn
-                && last_move
+            if last_move.end_piece.tp == PieceType::Pawn && last_move
                     .end_piece
                     .pos
                     .0
                     .abs_diff(last_move.start_piece.pos.0)
-                    == 2
-            {
-                if last_move.end_piece.pos.0 == p.pos.0
-                    && last_move.end_piece.pos.1.abs_diff(p.pos.1) == 1
-                {
-                    res.push(Move {
-                        start_piece: p,
-                        end_piece: Piece {
-                            pos: ((p.pos.0 as i8 + dr) as u8, last_move.end_piece.pos.1),
-                            ..p
-                        },
-                        captured_piece: Some(last_move.end_piece),
-                    });
-                }
+                    == 2 && last_move.end_piece.pos.0 == p.pos.0 && last_move.end_piece.pos.1.abs_diff(p.pos.1) == 1 {
+                res.push(Move {
+                    start_piece: p,
+                    end_piece: Piece {
+                        pos: ((p.pos.0 as i8 + dr) as u8, last_move.end_piece.pos.1),
+                        ..p
+                    },
+                    captured_piece: Some(last_move.end_piece),
+                });
             }
         }
 
